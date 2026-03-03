@@ -33,7 +33,7 @@ Without distributed tracing, you can only see fragments of this journey in indiv
 
 A **trace** represents the entire journey of a request through your system. It has a unique identifier (`trace-id`) that remains constant across all services involved.
 
-```
+```text
 Trace: User checkout flow
 trace-id: 4bf92f3577b34da6a3ce929d0e0e4736
 
@@ -46,7 +46,7 @@ All operations related to this checkout flow share the same `trace-id`, allowing
 
 A **span** represents a single operation within a trace. Each service or operation creates its own span, identified by a unique `parent-id`.
 
-```
+```text
 Trace: 4bf92f3577b34da6a3ce929d0e0e4736
 ├─ Span: 00f067aa0ba902b7 (API Gateway)  [100ms]
    ├─ Span: a1b2c3d4e5f6a7b8 (Cart Service) [60ms]
