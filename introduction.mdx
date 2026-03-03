@@ -1,0 +1,118 @@
+---
+title: Introduction
+description: W3C Trace Contexts made simple
+---
+
+# W3C Trace Contexts made simple
+
+tctx is a blazing fast, zero-dependency library for working with W3C Trace Context headers in JavaScript. It provides a simple API for creating, parsing, and manipulating `traceparent` and `tracestate` headers according to the W3C Trace Context Level 2 specification.
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card
+    title="W3C Spec Compliant"
+    icon="check-circle"
+  >
+    Fully compliant with W3C Trace Context Level 2 specification for distributed tracing.
+  </Card>
+  <Card
+    title="Blazing Fast Performance"
+    icon="bolt"
+  >
+    Up to 12x faster than alternative implementations with optimized algorithms.
+  </Card>
+  <Card
+    title="Universal Runtime Support"
+    icon="globe"
+  >
+    Works seamlessly in Node.js, Deno, Bun, and browsers without any changes.
+  </Card>
+  <Card
+    title="Zero Dependencies"
+    icon="feather"
+  >
+    Minimal footprint with only one dependency (@lukeed/csprng) for secure random generation.
+  </Card>
+  <Card
+    title="Simple API"
+    icon="code"
+  >
+    Intuitive functions for creating, parsing, and propagating trace contexts across services.
+  </Card>
+  <Card
+    title="TypeScript Support"
+    icon="typescript"
+  >
+    Full TypeScript type definitions included for excellent developer experience.
+  </Card>
+</CardGroup>
+
+## What is W3C Trace Context?
+
+The W3C Trace Context specification defines a standardized format for propagating trace information across distributed systems. It consists of two HTTP headers:
+
+- **traceparent** - Contains the core trace identification data (trace ID, parent ID, flags)
+- **tracestate** - Contains vendor-specific trace information as key-value pairs
+
+These headers enable distributed tracing systems to correlate requests across multiple services, making it easier to debug and monitor complex microservices architectures.
+
+## Quick Example
+
+```ts
+import * as traceparent from 'tctx/traceparent';
+import * as tracestate from 'tctx/tracestate';
+
+// Create a new trace context
+const parent = traceparent.make();
+const state = tracestate.make({ vendor: 'my-app', session: 'abc123' });
+
+// Propagate to downstream service
+fetch('/api/downstream', {
+  headers: {
+    traceparent: parent.child(),
+    tracestate: String(state),
+  },
+});
+```
+
+## Performance
+
+tctx is designed for performance. Benchmark results show it significantly outperforms alternative implementations:
+
+- **12.5x faster** than `traceparent` package for creating trace contexts
+- **11.3x faster** than `traceparent` package for creating child spans
+- **2.8x faster** than `trace-context` package on average
+
+## Get Started
+
+<CardGroup cols={2}>
+  <Card
+    title="Quickstart"
+    icon="rocket"
+    href="/quickstart"
+  >
+    Get up and running with tctx in minutes
+  </Card>
+  <Card
+    title="Installation"
+    icon="download"
+    href="/installation"
+  >
+    Install tctx with your preferred package manager
+  </Card>
+  <Card
+    title="API Reference"
+    icon="book"
+    href="/api/traceparent"
+  >
+    Explore the complete API documentation
+  </Card>
+  <Card
+    title="Guides"
+    icon="code"
+    href="/guides/producer-consumer"
+  >
+    See real-world usage examples and patterns
+  </Card>
+</CardGroup>

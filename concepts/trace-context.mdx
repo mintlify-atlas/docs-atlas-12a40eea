@@ -1,0 +1,368 @@
+---
+title: W3C Trace Context
+description: Understanding the W3C Trace Context specification and how tctx implements it
+---
+
+## What is W3C Trace Context?
+
+The [W3C Trace Context specification](https://www.w3.org/TR/trace-context-2/) is a standard for propagating distributed tracing context across service boundaries. It defines HTTP headers that allow you to track requests as they flow through multiple services in a distributed system.
+
+<Info>
+  tctx implements **W3C Trace Context Level 2**, providing a lightweight, spec-compliant way to handle distributed tracing in your applications.
+</Info>
+
+## Why Trace Context Matters
+
+In modern distributed systems, a single user request often touches dozens of services. Without a standardized way to correlate these interactions:
+
+- **Debugging becomes painful** - You can't track a request's journey through your system
+- **Performance analysis is incomplete** - You can't see the full picture of where time is spent
+- **Different vendors use incompatible formats** - Each monitoring tool has its own proprietary format
+
+The W3C Trace Context specification solves these problems by providing a vendor-neutral, standardized format that works across all systems and tools.
+
+---
+
+## The traceparent Header
+
+The `traceparent` header is the core of the W3C Trace Context specification. It carries essential information about a trace across service boundaries.
+
+### Anatomy of a traceparent
+
+```
+00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+^  ^                                ^                ^
+|  |                                |                |
+|  |                                |                flags (2 hex)
+|  |                                parent-id (16 hex)
+|  trace-id (32 hex)
+version (2 hex)
+```
+
+Each traceparent consists of four hyphen-separated fields:
+
+<Accordion title="version (2 hex digits)">
+  The version of the W3C Trace Context specification being used.
+  
+  - Current version is `00`
+  - Version `ff` is invalid (reserved for future use)
+  - Future versions will be backward compatible
+  
+  tctx always generates version `00` traceparents and normalizes parsed traceparents to this version.
+</Accordion>
+
+<Accordion title="trace-id (32 hex digits)">
+  A globally unique identifier for the entire trace.
+  
+  - Must be 32 hexadecimal characters (16 bytes)
+  - Cannot be all zeros (`00000000000000000000000000000000`)
+  - Remains the same for all spans within a single trace
+  - Generated randomly when starting a new trace
+  
+  This ID connects all related operations across all services involved in handling a request.
+</Accordion>
+
+<Accordion title="parent-id (16 hex digits)">
+  A unique identifier for the current operation/span.
+  
+  - Must be 16 hexadecimal characters (8 bytes)
+  - Cannot be all zeros (`0000000000000000`)
+  - Changes with each child span created
+  - Becomes the "parent" when passed downstream
+  
+  When a service receives a request and makes downstream calls, it creates a new parent-id for each call while preserving the trace-id.
+</Accordion>
+
+<Accordion title="flags (2 hex digits)">
+  Bit flags that control trace behavior.
+  
+  - Bit 0 (`0x01`): **sampled** - Indicates whether this trace should be recorded
+  - Bit 1 (`0x02`): **random** - Indicates the trace-id was randomly generated (tctx extension)
+  - Bits 2-7: Reserved for future use
+  
+  Common flag values:
+  - `00`: Not sampled
+  - `01`: Sampled
+  - `03`: Sampled and random (tctx default)
+</Accordion>
+
+### Working with traceparent in tctx
+
+#### Creating a new traceparent
+
+```typescript
+import * as traceparent from 'tctx/traceparent';
+
+const parent = traceparent.make();
+console.log(parent.toString());
+// 00-aa3ee2e08eb134a292fb799969f2de62-62994ea4677bc463-03
+```
+
+<Note>
+  By default, `make()` creates a traceparent with both the `FLAG_SAMPLE` (0x01) and `FLAG_RANDOM` (0x02) flags set, resulting in flags value `03`.
+</Note>
+
+#### Parsing an incoming traceparent
+
+```typescript
+import * as traceparent from 'tctx/traceparent';
+
+const parent = traceparent.parse(
+  req.headers.get('traceparent')
+);
+
+if (parent) {
+  console.log(parent.trace_id);  // aa3ee2e08eb134a292fb799969f2de62
+  console.log(parent.parent_id); // 62994ea4677bc463
+  console.log(parent.flags);     // 3
+}
+```
+
+<Tip>
+  Always handle the case where `parse()` returns `null` (invalid or missing header). Fallback to `make()` to start a new trace.
+</Tip>
+
+#### Creating child spans
+
+```typescript
+const parent = traceparent.parse(req.headers.get('traceparent')) 
+  || traceparent.make();
+
+// Make a downstream call with a child span
+fetch('/downstream', {
+  headers: {
+    traceparent: parent.child().toString()
+  }
+});
+```
+
+The `child()` method:
+- Preserves the `trace_id` (keeping the trace intact)
+- Generates a new random `parent_id` (identifying this specific operation)
+- Copies all flags from the parent
+
+#### Sampling control
+
+tctx provides utilities to control sampling:
+
+```typescript
+import { 
+  make, 
+  sample, 
+  unsample, 
+  is_sampled 
+} from 'tctx/traceparent';
+
+const parent = make();
+
+console.log(is_sampled(parent)); // true (sampled by default)
+
+unsample(parent);
+console.log(is_sampled(parent)); // false
+
+sample(parent);
+console.log(is_sampled(parent)); // true
+```
+
+<Note>
+  According to the W3C spec, you should create a child span (`.child()`) before modifying sampling flags to ensure proper trace hierarchy.
+</Note>
+
+---
+
+## The tracestate Header
+
+While `traceparent` provides standardized trace correlation, `tracestate` allows vendors and applications to attach additional metadata to traces.
+
+### Ring Buffer Design
+
+tracestate is implemented as a **ring buffer** with the following characteristics:
+
+- Maximum of **32 key-value pairs**
+- Keys can be up to **256 characters**
+- Values can be up to **256 characters**
+- Most recently updated entries appear first
+- When full, the oldest entry is removed when adding new ones
+
+### Key Format
+
+Keys must follow one of two formats:
+
+1. **Simple keys**: `[a-z0-9][_0-9a-z-*/]{0,255}`
+   ```
+   vendor
+   my-service
+   trace_info
+   ```
+
+2. **Tenant keys**: `[a-z0-9][_0-9a-z-*/]{0,240}@[a-z][_0-9a-z-*/]{0,13}`
+   ```
+   service@vendor
+   app@company
+   ```
+
+<Info>
+  Tenant keys (with `@`) allow multi-tenant systems to namespace their trace data.
+</Info>
+
+### Value Format
+
+Values must:
+- Contain only printable ASCII characters (space through `~`)
+- Not contain commas (`,`) or equals signs (`=`)
+- Not end with trailing whitespace
+- Match pattern: `/^[ -~]{0,255}[!-~]$/`
+
+### Working with tracestate in tctx
+
+#### Creating a new tracestate
+
+```typescript
+import * as tracestate from 'tctx/tracestate';
+
+const state = tracestate.make({ 
+  vendor: 'my-value',
+  service: 'api-gateway' 
+});
+
+console.log(state.toString());
+// service=api-gateway,vendor=my-value
+```
+
+#### Parsing an incoming tracestate
+
+```typescript
+const state = tracestate.parse(
+  req.headers.get('tracestate')
+);
+
+console.log(state.get('vendor')); // my-value
+```
+
+<Note>
+  You should only parse `tracestate` if you successfully parsed a valid `traceparent` header, as per the W3C specification.
+</Note>
+
+#### Updating tracestate
+
+```typescript
+const state = tracestate.parse(req.headers.get('tracestate')) 
+  || tracestate.make();
+
+// Add or update a key (moves it to the front)
+state.set('my-service', 'processed');
+state.set('timestamp', Date.now().toString());
+
+// Use it in downstream calls
+fetch('/downstream', {
+  headers: {
+    traceparent: parent.child().toString(),
+    tracestate: state.toString()
+  }
+});
+```
+
+When you call `set()`:
+1. If the key exists, its value is updated and it moves to the front
+2. If the key is new and there's space, it's prepended
+3. If the ring buffer is full (32 entries), the oldest entry is removed
+
+---
+
+## Complete Example
+
+Here's how to use both headers together in a real-world scenario:
+
+```typescript
+import * as traceparent from 'tctx/traceparent';
+import * as tracestate from 'tctx/tracestate';
+
+// Incoming request handler
+export async function handler(req: Request) {
+  // Parse incoming headers
+  let parent = traceparent.parse(req.headers.get('traceparent'));
+  let state: Tracestate | null = null;
+  
+  // Only parse tracestate if traceparent is valid
+  if (parent) {
+    const ts = req.headers.get('tracestate');
+    if (ts) state = tracestate.parse(ts);
+  }
+  
+  // Create new trace if no valid parent
+  parent ||= traceparent.make();
+  state ||= tracestate.make();
+  
+  // Add your service's metadata
+  state.set('my-service', 'processing');
+  state.set('request-id', crypto.randomUUID());
+  
+  // Make downstream calls with child span
+  const response = await fetch('https://api.example.com/data', {
+    headers: {
+      'traceparent': parent.child().toString(),
+      'tracestate': state.toString()
+    }
+  });
+  
+  // Update state after processing
+  state.set('my-service', 'completed');
+  
+  return new Response(await response.text(), {
+    headers: {
+      'traceparent': parent.toString(),
+      'tracestate': state.toString()
+    }
+  });
+}
+```
+
+<Tip>
+  Always create a child span (`.child()`) when making downstream calls to maintain proper trace hierarchy.
+</Tip>
+
+---
+
+## Validation and Error Handling
+
+tctx performs robust validation on both parsing and creation:
+
+### traceparent Validation
+
+The `parse()` function returns `null` if:
+- The header is too short (< 55 characters)
+- Contains invalid characters (underscores, non-hex)
+- Version is `ff` (invalid/reserved)
+- trace-id is all zeros
+- parent-id is all zeros
+- Flags are not exactly 2 hex digits
+
+### tracestate Validation
+
+The `set()` method throws `TypeError` if:
+- Key doesn't match allowed patterns
+- Value contains commas or equals signs
+- Value is longer than 256 characters
+- Value ends with whitespace
+
+```typescript
+try {
+  state.set('invalid,key', 'value');
+} catch (e) {
+  console.error('Invalid tracestate key or value');
+}
+```
+
+---
+
+## Performance
+
+tctx is designed for high performance with minimal overhead:
+
+- **12.47x faster** than alternatives for creating traceparents
+- **11.29x faster** for creating child spans
+- Uses cryptographically secure random generation
+- Zero dependencies beyond `@lukeed/csprng`
+- Optimized string operations and validation
+
+See the [benchmarks](/benchmarks) for detailed performance comparisons.

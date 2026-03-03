@@ -1,0 +1,166 @@
+---
+title: tracestate
+description: API reference for the tracestate module - W3C Trace Context tracestate header implementation
+---
+
+A simple implementation of the [W3C Trace Context specification level 2](https://www.w3.org/TR/trace-context-2/).
+
+This module provides a simple API for creating, parsing, and manipulating tracestate headers. You will probably also be relying on the [traceparent](/api/traceparent) module to create and parse traceparent headers.
+
+Tracestates are effectively a ring buffer of 32 key-value pairs, where the key is a string of up to 256 characters and the value is a string of up to 256 characters. The key must be unique within the tracestate.
+
+Updating the tracestate is done by calling the `set()` method, which will update the value of the key if it exists (and move it to the front), or prepend a new key-value pair to the front of the tracestate. If the tracestate is full, the oldest key-value pair will be removed.
+
+## Quick Start
+
+```ts
+import * as tp from 'tctx/traceparent';
+import * as ts from 'tctx/tracestate';
+
+let traceparent, tracestate, tmp;
+tmp = req.headers.get('traceparent');
+if (tmp) traceparent = tp.parse(tmp);
+
+tmp = req.headers.get('tracestate');
+// only parse the tracestate, if we have a valid parsed traceparent, as per spec
+if (traceparent && tmp) tracestate = ts.parse(tmp);
+traceparent ||= tp.make();
+
+let headers = new Headers();
+if (tracestate) headers.set('tracestate', String(tracestate));
+
+tracestate.set('vendor', 'value');
+
+fetch('/downstream', {
+  headers: { traceparent: traceparent.child(), tracestate }
+})
+```
+
+## Functions
+
+### make(initial?)
+
+Create a new tracestate instance.
+
+<ParamField path="initial" type="Iterable<[string, unknown]>" optional>
+  Optional iterable of key-value pairs to initialize the tracestate
+</ParamField>
+
+<ResponseField name="return" type="Tracestate">
+  A new Tracestate instance
+</ResponseField>
+
+```ts
+let tracestate = make({ key: 'value' });
+tracestate.set('key2', 'value2');
+
+console.log(String(tracestate)); // 'key2=value2,key=value'
+```
+
+### parse(value)
+
+Parse a tracestate header string into a tracestate instance.
+
+<ParamField path="value" type="string" required>
+  The tracestate header value to parse
+</ParamField>
+
+<ResponseField name="return" type="Tracestate">
+  A Tracestate instance containing the parsed key-value pairs
+</ResponseField>
+
+```ts
+let tracestate = parse('key=value,key2=value2');
+
+console.log(tracestate.get('key')); // 'value'
+console.log(tracestate.get('key2')); // 'value2'
+
+tracestate.set('key', 'new-value');
+
+console.log(String(tracestate)); // 'key=new-value,key2=value2'
+```
+
+## Types
+
+### Tracestate
+
+The Tracestate type represents a W3C Trace Context tracestate header, implemented as a ring buffer using a JavaScript `Map`.
+
+The Tracestate class extends the native JavaScript `Map` class, so all standard Map methods are available (e.g., `get()`, `has()`, `delete()`, `clear()`, `size`).
+
+#### set(key, value)
+
+Sets a key-value pair in the tracestate. If the key already exists, it updates the value and moves it to the front. If the tracestate is full (32 entries), the oldest entry is removed.
+
+<ParamField path="key" type="string" required>
+  The key to set. Must match the pattern: `[a-z0-9][_0-9a-z-*/]{0,255}` or `[a-z0-9][_0-9a-z-*/]{0,240}@[a-z][_0-9a-z-*/]{0,13}` for vendor-specific keys
+</ParamField>
+
+<ParamField path="value" type="unknown" required>
+  The value to set. Must be a string of up to 256 printable ASCII characters (0x20-0x7E), excluding commas and equals signs
+</ParamField>
+
+<ResponseField name="return" type="this">
+  The Tracestate instance (for chaining)
+</ResponseField>
+
+```ts
+const tracestate = make();
+tracestate.set('vendor', 'value');
+tracestate.set('key2', 'value2');
+
+console.log(String(tracestate)); // 'key2=value2,vendor=value'
+
+// Updating an existing key moves it to the front
+tracestate.set('vendor', 'new-value');
+console.log(String(tracestate)); // 'vendor=new-value,key2=value2'
+```
+
+<Note>
+The `set()` method will throw a `TypeError` if the key or value is invalid according to the W3C Trace Context specification.
+</Note>
+
+#### toString()
+
+Converts the Tracestate to its string representation for use in HTTP headers.
+
+<ResponseField name="return" type="string">
+  The formatted tracestate string with comma-separated key-value pairs (e.g., "key=value,key2=value2")
+</ResponseField>
+
+```ts
+const tracestate = make();
+tracestate.set('vendor', 'value');
+tracestate.set('key2', 'value2');
+
+console.log(tracestate.toString()); // 'key2=value2,vendor=value'
+console.log(String(tracestate)); // Same as toString()
+```
+
+## Map Methods
+
+Since Tracestate extends `Map`, you can use all standard Map methods:
+
+```ts
+const tracestate = parse('key=value,key2=value2');
+
+// Get a value
+tracestate.get('key'); // 'value'
+
+// Check if a key exists
+tracestate.has('key'); // true
+
+// Delete a key
+tracestate.delete('key');
+
+// Get the size
+tracestate.size; // 1
+
+// Clear all entries
+tracestate.clear();
+
+// Iterate over entries
+for (const [key, value] of tracestate) {
+  console.log(`${key}=${value}`);
+}
+```

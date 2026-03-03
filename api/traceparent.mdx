@@ -1,0 +1,210 @@
+---
+title: traceparent
+description: API reference for the traceparent module - W3C Trace Context traceparent header implementation
+---
+
+A simple implementation of the [W3C Trace Context specification level 2](https://www.w3.org/TR/trace-context-2/).
+
+This module provides a simple API for creating, parsing, and manipulating traceparent headers.
+
+## Anatomy of a traceparent
+
+```
+00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+^  ^                                ^                ^
+|  |                                |                |
+|  |                                |                flags (2 hex)
+|  |                                parent-id (16 hex)
+|  trace-id (32 hex)
+version (2 hex)
+```
+
+## Quick Start
+
+```ts
+import { parse, make } from 'tctx/traceparent';
+
+let traceparent = parse(req.headers.get('traceparent')) || make();
+
+fetch('/downstream', {
+  headers: { traceparent: traceparent.child() }
+})
+```
+
+## Functions
+
+### make()
+
+Makes a new Traceparent which one can then `toString()` to get the value.
+
+By default the flags are both sampled (`FLAG_SAMPLE`) and randomed (`FLAG_RANDOM`).
+
+<ResponseField name="return" type="Traceparent">
+  A new Traceparent instance with randomly generated trace-id and parent-id
+</ResponseField>
+
+```js
+const id = make();
+String(id); // 00-aa3ee2e08eb134a292fb799969f2de62-62994ea4677bc463-01
+const child = id.child();
+String(child); // 00-aa3ee2e08eb134a292fb799969f2de62-5402ac6f6874d505-01
+```
+
+### parse(value)
+
+Allows you to parse an incoming value into the areas, easy for a server to continue the trace chain.
+
+<ParamField path="value" type="string" required>
+  The traceparent header value to parse
+</ParamField>
+
+<ResponseField name="return" type="Traceparent | null">
+  A Traceparent instance if parsing succeeds, or null if the value is invalid
+</ResponseField>
+
+```js
+const parent = parse(req.headers.traceparent); // 00-aa3ee2e08eb134a292fb799969f2de62-62994ea4677bc463-00
+const child = parent.child();
+String(child); // 00-aa3ee2e08eb134a292fb799969f2de62-5402ac6f6874d505-01
+```
+
+### sample(id)
+
+Modifies the flags of a Traceparent to sample the traceparent flag bit.
+
+<ParamField path="id" type="Traceparent" required>
+  The Traceparent instance to modify
+</ParamField>
+
+<Note>
+You may wish to `.child()` before you sample, as is required by the [spec](https://www.w3.org/TR/trace-context-2/#sampled-flag)
+</Note>
+
+```js
+const id = make();
+sample(id);
+console.log(is_sampled(id)); // true
+```
+
+### unsample(id)
+
+Modifies the flags of a Traceparent to unsample the traceparent flag bit.
+
+<ParamField path="id" type="Traceparent" required>
+  The Traceparent instance to modify
+</ParamField>
+
+<Note>
+You may wish to `.child()` before you unsample, as is required by the [spec](https://www.w3.org/TR/trace-context-2/#sampled-flag)
+</Note>
+
+```js
+const id = make();
+unsample(id);
+console.log(is_sampled(id)); // false
+```
+
+### is_sampled(id)
+
+Returns if the traceparent is currently being sampled.
+
+<ParamField path="id" type="Traceparent" required>
+  The Traceparent instance to check
+</ParamField>
+
+<ResponseField name="return" type="boolean">
+  True if the sampled flag bit is set, false otherwise
+</ResponseField>
+
+```js
+const id = make();
+console.log(is_sampled(id)); // true (by default)
+```
+
+### is_randomed(id)
+
+Returns if the traceparent is currently random.
+
+<ParamField path="id" type="Traceparent" required>
+  The Traceparent instance to check
+</ParamField>
+
+<ResponseField name="return" type="boolean">
+  True if the random flag bit is set, false otherwise
+</ResponseField>
+
+```js
+const id = make();
+console.log(is_randomed(id)); // true (by default)
+```
+
+## Constants
+
+### FLAG_SAMPLE
+
+The bitmask representing a sampled traceparent.
+
+```js
+export const FLAG_SAMPLE = 0b00000001; // 1
+```
+
+### FLAG_RANDOM
+
+The bitmask representing a random traceparent.
+
+```js
+export const FLAG_RANDOM = 0b00000010; // 2
+```
+
+## Types
+
+### Traceparent
+
+The Traceparent type represents a W3C Trace Context traceparent header.
+
+<ResponseField name="version" type="string">
+  The version of the traceparent (always "00" for current implementation)
+</ResponseField>
+
+<ResponseField name="trace_id" type="string">
+  The trace ID (32 hexadecimal characters)
+</ResponseField>
+
+<ResponseField name="parent_id" type="string">
+  The parent ID (16 hexadecimal characters)
+</ResponseField>
+
+<ResponseField name="flags" type="number">
+  The flags byte as a number (0-255)
+</ResponseField>
+
+#### child()
+
+Branches the traceparent into a new child, creating a new parent_id. All existing flags are copied over.
+
+<ResponseField name="return" type="Traceparent">
+  A new Traceparent with the same trace_id and flags, but a new parent_id
+</ResponseField>
+
+```js
+const parent = make();
+const child = parent.child();
+
+console.log(parent.trace_id === child.trace_id); // true
+console.log(parent.parent_id === child.parent_id); // false
+console.log(parent.flags === child.flags); // true
+```
+
+#### toString()
+
+Converts the Traceparent to its string representation for use in HTTP headers.
+
+<ResponseField name="return" type="string">
+  The formatted traceparent string (e.g., "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+</ResponseField>
+
+```js
+const id = make();
+console.log(id.toString()); // 00-aa3ee2e08eb134a292fb799969f2de62-62994ea4677bc463-03
+console.log(String(id)); // Same as toString()
+```

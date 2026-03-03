@@ -1,0 +1,672 @@
+---
+title: Distributed Tracing
+description: Understanding distributed tracing concepts and how trace context enables observability
+---
+
+## What is Distributed Tracing?
+
+Distributed tracing is a method for tracking and observing requests as they flow through multiple services in a distributed system. It provides visibility into the entire lifecycle of a request, from the initial entry point through all downstream service calls.
+
+<Info>
+  Think of distributed tracing as a GPS for your requests - it shows you the complete path a request takes through your system, how long each step takes, and where problems occur.
+</Info>
+
+### The Challenge
+
+Modern applications are rarely monolithic. A single user action might trigger:
+
+1. An API gateway request
+2. Authentication service verification
+3. Database queries across multiple services
+4. Cache lookups
+5. External API calls
+6. Message queue operations
+7. Background job processing
+
+Without distributed tracing, you can only see fragments of this journey in individual service logs. **You lose the connection between cause and effect.**
+
+---
+
+## Key Concepts
+
+### Traces
+
+A **trace** represents the entire journey of a request through your system. It has a unique identifier (`trace-id`) that remains constant across all services involved.
+
+```
+Trace: User checkout flow
+trace-id: 4bf92f3577b34da6a3ce929d0e0e4736
+
+Service A (API Gateway) → Service B (Cart) → Service C (Payment) → Service D (Inventory)
+```
+
+All operations related to this checkout flow share the same `trace-id`, allowing you to correlate logs, metrics, and events across all four services.
+
+### Spans
+
+A **span** represents a single operation within a trace. Each service or operation creates its own span, identified by a unique `parent-id`.
+
+```
+Trace: 4bf92f3577b34da6a3ce929d0e0e4736
+├─ Span: 00f067aa0ba902b7 (API Gateway)  [100ms]
+   ├─ Span: a1b2c3d4e5f6a7b8 (Cart Service) [60ms]
+   │  └─ Span: b2c3d4e5f6a7b8c9 (Database)  [40ms]
+   └─ Span: c3d4e5f6a7b8c9d0 (Payment)     [80ms]
+      └─ Span: d4e5f6a7b8c9d0e1 (Bank API)  [70ms]
+```
+
+Each span tracks:
+- **Duration**: How long the operation took
+- **Parent relationship**: Which span triggered this one
+- **Metadata**: Additional context about the operation
+
+### Context Propagation
+
+**Context propagation** is the mechanism of passing trace information from one service to another. This is where the W3C Trace Context specification and tctx come in.
+
+Without standardized propagation:
+```typescript
+// Service A
+fetch('/service-b', { 
+  headers: { 'x-custom-trace': 'some-id' } 
+});
+
+// Service B doesn't know how to interpret 'x-custom-trace'
+// The trace is broken
+```
+
+With W3C Trace Context:
+```typescript
+// Service A
+import * as traceparent from 'tctx/traceparent';
+
+const parent = traceparent.make();
+fetch('/service-b', {
+  headers: { 'traceparent': parent.child().toString() }
+});
+
+// Service B
+const parent = traceparent.parse(req.headers.get('traceparent'));
+// ✓ Service B understands the standard format and continues the trace
+```
+
+---
+
+## How Trace Context Enables Distributed Tracing
+
+The W3C Trace Context specification provides the foundation for distributed tracing by standardizing how trace information flows between services.
+
+### The Flow
+
+<Steps>
+  <Step title="Initial Request">
+    A request arrives at your system's entry point (e.g., API gateway).
+    
+    ```typescript
+    // No traceparent header exists yet
+    const parent = traceparent.make();
+    // Creates: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-03
+    ```
+  </Step>
+  
+  <Step title="First Service Processing">
+    The first service processes the request and needs to call downstream services.
+    
+    ```typescript
+    // Create child span for downstream call
+    fetch('/cart-service', {
+      headers: {
+        'traceparent': parent.child().toString()
+      }
+    });
+    // Sends: 00-4bf92f3577b34da6a3ce929d0e0e4736-a1b2c3d4e5f6a7b8-03
+    //                                           ^^^^^^^^^^^^^^^^ (new parent-id)
+    ```
+  </Step>
+  
+  <Step title="Downstream Service">
+    The downstream service receives the traceparent and continues the trace.
+    
+    ```typescript
+    // Parse incoming trace context
+    const parent = traceparent.parse(req.headers.get('traceparent'));
+    
+    // Make another downstream call
+    fetch('/payment-service', {
+      headers: {
+        'traceparent': parent.child().toString()
+      }
+    });
+    // Sends: 00-4bf92f3577b34da6a3ce929d0e0e4736-b2c3d4e5f6a7b8c9-03
+    //            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (same trace-id)
+    //                                             ^^^^^^^^^^^^^^^^ (new parent-id)
+    ```
+  </Step>
+  
+  <Step title="Complete Trace">
+    All services maintain the same `trace-id` while creating unique `parent-id`s, creating a complete trace hierarchy.
+  </Step>
+</Steps>
+
+### Trace Hierarchy Visualization
+
+```
+HTTP Request → API Gateway
+               trace-id: 4bf92f3577b34da6a3ce929d0e0e4736
+               parent-id: 00f067aa0ba902b7
+               |
+               ├─→ Cart Service
+               │   trace-id: 4bf92f3577b34da6a3ce929d0e0e4736 (same)
+               │   parent-id: a1b2c3d4e5f6a7b8 (new)
+               │   |
+               │   └─→ Database Query
+               │       trace-id: 4bf92f3577b34da6a3ce929d0e0e4736 (same)
+               │       parent-id: b2c3d4e5f6a7b8c9 (new)
+               │
+               └─→ Payment Service
+                   trace-id: 4bf92f3577b34da6a3ce929d0e0e4736 (same)
+                   parent-id: c3d4e5f6a7b8c9d0 (new)
+                   |
+                   └─→ External Bank API
+                       trace-id: 4bf92f3577b34da6a3ce929d0e0e4736 (same)
+                       parent-id: d4e5f6a7b8c9d0e1 (new)
+```
+
+---
+
+## Why Trace Context Matters
+
+### 1. End-to-End Visibility
+
+Without trace context:
+```
+[API Gateway]: Request processed in 200ms
+[Cart Service]: Query took 60ms
+[Payment Service]: Transaction completed in 80ms
+```
+
+With trace context:
+```
+Trace 4bf92f3577b34da6a3ce929d0e0e4736:
+├─ API Gateway (200ms total)
+│  ├─ Cart Service (60ms)
+│  │  └─ Database (40ms) ← 66% of cart service time
+│  └─ Payment Service (80ms)
+│     └─ Bank API (70ms) ← 87% of payment service time!
+```
+
+You can now see that most time is spent on external calls, not your code.
+
+### 2. Cross-Service Debugging
+
+When a user reports an error, search logs across all services for the trace-id:
+
+```bash
+# Find all log entries related to this request
+grep "4bf92f3577b34da6a3ce929d0e0e4736" /var/log/**/*.log
+```
+
+You'll see:
+- Which service failed
+- What upstream events led to the failure
+- What downstream operations were affected
+- The complete request timeline
+
+### 3. Performance Analysis
+
+Identify bottlenecks by analyzing span durations:
+
+```typescript
+// Log spans with timing information
+console.log({
+  trace_id: parent.trace_id,
+  parent_id: parent.parent_id,
+  service: 'payment-service',
+  operation: 'process_payment',
+  duration_ms: 850 // ← This operation is slow!
+});
+```
+
+Aggregating this data reveals patterns:
+- Which operations are consistently slow
+- Where time is actually spent
+- How changes affect performance across services
+
+### 4. Vendor Interoperability
+
+Because W3C Trace Context is a standard, different observability tools can work together:
+
+- Service A uses **Datadog**
+- Service B uses **New Relic**
+- Service C uses **OpenTelemetry**
+
+All three systems can participate in the same trace because they all understand the `traceparent` header format.
+
+---
+
+## Sampling
+
+In high-traffic systems, tracing every request is impractical and expensive. **Sampling** lets you trace a representative subset of requests.
+
+### The Sampled Flag
+
+The `traceparent` header includes a `sampled` flag (bit 0 of the flags field):
+
+```typescript
+import { make, sample, unsample, is_sampled } from 'tctx/traceparent';
+
+const parent = make();
+console.log(is_sampled(parent)); // true (sampled by default)
+
+// Implement sampling logic
+if (Math.random() > 0.1) { // Sample only 10% of requests
+  unsample(parent);
+}
+```
+
+### Sampling Strategies
+
+<Accordion title="Head-based Sampling">
+  The decision to sample is made at the trace's origin (the "head").
+  
+  ```typescript
+  // Entry point service
+  const parent = make();
+  
+  // Sample 10% of requests
+  if (Math.random() > 0.1) {
+    unsample(parent);
+  }
+  ```
+  
+  **Pros**: Simple, efficient, consistent
+  
+  **Cons**: Might miss interesting traces (errors, slow requests)
+</Accordion>
+
+<Accordion title="Tail-based Sampling">
+  The decision is made after observing the complete trace.
+  
+  ```typescript
+  // Collect spans in memory
+  const spans = collectSpans(trace_id);
+  
+  // Decide based on trace characteristics
+  const shouldSample = 
+    hasError(spans) || 
+    isSlowTrace(spans) || 
+    matchesRules(spans);
+  
+  if (shouldSample) {
+    exportToStorage(spans);
+  }
+  ```
+  
+  **Pros**: Captures interesting traces, more intelligent
+  
+  **Cons**: Complex, requires buffering, higher memory usage
+</Accordion>
+
+<Accordion title="Adaptive Sampling">
+  Sampling rate adjusts based on traffic patterns and system load.
+  
+  ```typescript
+  let sampleRate = 0.1; // Start at 10%
+  
+  setInterval(() => {
+    if (highTraffic()) {
+      sampleRate = Math.max(0.01, sampleRate * 0.5);
+    } else {
+      sampleRate = Math.min(1.0, sampleRate * 1.5);
+    }
+  }, 60000);
+  ```
+  
+  **Pros**: Balances cost and coverage
+  
+  **Cons**: Requires monitoring infrastructure
+</Accordion>
+
+### Respecting Upstream Sampling Decisions
+
+When receiving a traced request, respect the upstream sampling decision:
+
+```typescript
+const parent = traceparent.parse(req.headers.get('traceparent'));
+
+if (parent && !is_sampled(parent)) {
+  // Don't record this trace, but continue propagating it
+  return; // Skip expensive tracing operations
+}
+
+// Record trace data only if sampled
+recordSpan({
+  trace_id: parent.trace_id,
+  parent_id: parent.parent_id,
+  duration_ms: elapsed
+});
+```
+
+<Note>
+  According to the W3C spec, downstream services should respect the sampled flag but can make their own decisions. Common practice is to honor upstream decisions to maintain consistent sampling across a trace.
+</Note>
+
+---
+
+## Adding Metadata with tracestate
+
+While `traceparent` provides standardized trace correlation, `tracestate` allows you to attach service-specific metadata.
+
+### Use Cases
+
+<CardGroup cols={2}>
+  <Card title="User Context" icon="user">
+    ```typescript
+    state.set('user-id', userId);
+    state.set('tenant', tenantId);
+    ```
+    Track which user triggered the trace
+  </Card>
+  
+  <Card title="Feature Flags" icon="flag">
+    ```typescript
+    state.set('feature-x', 'enabled');
+    state.set('experiment', 'variant-b');
+    ```
+    See which features were active
+  </Card>
+  
+  <Card title="Request Metadata" icon="tag">
+    ```typescript
+    state.set('api-version', 'v2');
+    state.set('client', 'mobile-app');
+    ```
+    Track request characteristics
+  </Card>
+  
+  <Card title="Routing Info" icon="route">
+    ```typescript
+    state.set('region', 'us-west-2');
+    state.set('environment', 'production');
+    ```
+    Record infrastructure details
+  </Card>
+</CardGroup>
+
+### Complete Example
+
+```typescript
+import * as traceparent from 'tctx/traceparent';
+import * as tracestate from 'tctx/tracestate';
+
+export async function handleRequest(req: Request) {
+  // Parse or create trace context
+  let parent = traceparent.parse(req.headers.get('traceparent'));
+  let state = parent 
+    ? tracestate.parse(req.headers.get('tracestate'))
+    : null;
+  
+  parent ||= traceparent.make();
+  state ||= tracestate.make();
+  
+  // Add service-specific metadata
+  state.set('api-gateway', 'processed');
+  state.set('user-id', getUserId(req));
+  state.set('api-version', 'v2');
+  
+  const startTime = Date.now();
+  
+  try {
+    // Make downstream call
+    const response = await fetch('https://cart-service/checkout', {
+      headers: {
+        'traceparent': parent.child().toString(),
+        'tracestate': state.toString()
+      }
+    });
+    
+    // Record successful span
+    recordSpan({
+      trace_id: parent.trace_id,
+      parent_id: parent.parent_id,
+      service: 'api-gateway',
+      operation: 'checkout',
+      duration_ms: Date.now() - startTime,
+      status: 'ok'
+    });
+    
+    return response;
+  } catch (error) {
+    // Record error span
+    recordSpan({
+      trace_id: parent.trace_id,
+      parent_id: parent.parent_id,
+      service: 'api-gateway',
+      operation: 'checkout',
+      duration_ms: Date.now() - startTime,
+      status: 'error',
+      error: error.message
+    });
+    
+    throw error;
+  }
+}
+```
+
+---
+
+## Integration with Observability Tools
+
+tctx provides the foundation for integration with popular observability platforms:
+
+### OpenTelemetry
+
+```typescript
+import { trace } from '@opentelemetry/api';
+import * as traceparent from 'tctx/traceparent';
+
+const parent = traceparent.parse(req.headers.get('traceparent'));
+
+if (parent) {
+  const tracer = trace.getTracer('my-service');
+  const span = tracer.startSpan('operation', {
+    attributes: {
+      'trace.id': parent.trace_id,
+      'span.id': parent.parent_id
+    }
+  });
+}
+```
+
+### Custom Logging
+
+```typescript
+import * as traceparent from 'tctx/traceparent';
+
+const parent = traceparent.parse(req.headers.get('traceparent')) 
+  || traceparent.make();
+
+// Structured logging with trace context
+console.log(JSON.stringify({
+  level: 'info',
+  message: 'Processing request',
+  trace_id: parent.trace_id,
+  span_id: parent.parent_id,
+  timestamp: new Date().toISOString()
+}));
+```
+
+### APM Tools
+
+Most Application Performance Monitoring tools automatically recognize W3C Trace Context headers:
+
+- **Datadog**: Reads `traceparent` and `tracestate` automatically
+- **New Relic**: Native support for W3C Trace Context
+- **Elastic APM**: Full W3C Trace Context support
+- **Honeycomb**: Accepts standard trace headers
+
+---
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Always propagate trace context">
+    Even if your service doesn't record traces, always propagate the headers:
+    
+    ```typescript
+    const headers = new Headers();
+    
+    // Preserve trace context
+    const tp = req.headers.get('traceparent');
+    if (tp) headers.set('traceparent', tp);
+    
+    const ts = req.headers.get('tracestate');
+    if (ts) headers.set('tracestate', ts);
+    
+    fetch('/downstream', { headers });
+    ```
+  </Accordion>
+  
+  <Accordion title="Create child spans for downstream calls">
+    Always use `.child()` when making outbound requests:
+    
+    ```typescript
+    // ✓ Correct
+    fetch('/api', {
+      headers: { traceparent: parent.child().toString() }
+    });
+    
+    // ✗ Incorrect - breaks trace hierarchy
+    fetch('/api', {
+      headers: { traceparent: parent.toString() }
+    });
+    ```
+  </Accordion>
+  
+  <Accordion title="Validate before parsing tracestate">
+    Only parse `tracestate` if `traceparent` is valid:
+    
+    ```typescript
+    const parent = traceparent.parse(req.headers.get('traceparent'));
+    let state = null;
+    
+    if (parent) {
+      const ts = req.headers.get('tracestate');
+      if (ts) state = tracestate.parse(ts);
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Use meaningful tracestate keys">
+    Choose descriptive, namespaced keys:
+    
+    ```typescript
+    // ✓ Good - clear, namespaced
+    state.set('payment-svc@company', 'processed');
+    state.set('user-id', '12345');
+    
+    // ✗ Bad - vague, conflicts likely
+    state.set('status', 'ok');
+    state.set('id', '12345');
+    ```
+  </Accordion>
+  
+  <Accordion title="Implement sampling early">
+    Make sampling decisions at the entry point:
+    
+    ```typescript
+    const parent = make();
+    
+    // Sample based on your requirements
+    if (!shouldSample(req)) {
+      unsample(parent);
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Common Patterns
+
+### Middleware Pattern
+
+```typescript
+function traceMiddleware(handler: Handler): Handler {
+  return async (req: Request) => {
+    const parent = traceparent.parse(req.headers.get('traceparent')) 
+      || traceparent.make();
+    
+    const state = parent
+      ? tracestate.parse(req.headers.get('tracestate'))
+      : null;
+    
+    // Attach to request context
+    req.trace = { parent, state };
+    
+    return handler(req);
+  };
+}
+```
+
+### Service Client Pattern
+
+```typescript
+class ServiceClient {
+  constructor(private baseURL: string) {}
+  
+  async call(path: string, parent: Traceparent) {
+    return fetch(`${this.baseURL}${path}`, {
+      headers: {
+        'traceparent': parent.child().toString()
+      }
+    });
+  }
+}
+```
+
+### Background Job Pattern
+
+```typescript
+interface Job {
+  data: unknown;
+  trace?: string; // Serialized traceparent
+}
+
+// Producer
+queue.push({
+  data: { user_id: 123 },
+  trace: parent.toString()
+});
+
+// Consumer
+const job = await queue.pop();
+const parent = job.trace 
+  ? traceparent.parse(job.trace)
+  : traceparent.make();
+
+// Continue the trace in background processing
+processJob(job.data, parent);
+```
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="API Reference" icon="code" href="/api/traceparent">
+    Explore the complete tctx API
+  </Card>
+  
+  <Card title="Guides" icon="book" href="/guides/producer-consumer">
+    See real-world usage examples
+  </Card>
+  
+  <Card title="Core Concepts" icon="arrow-right" href="/concepts/trace-context">
+    Learn about W3C Trace Context
+  </Card>
+  
+  <Card title="Performance" icon="gauge" href="/performance/benchmarks">
+    Learn about tctx's performance
+  </Card>
+</CardGroup>

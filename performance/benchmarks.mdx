@@ -1,0 +1,112 @@
+---
+title: Benchmarks
+description: Performance benchmarks showing tctx's speed advantages
+---
+
+## Overview
+
+tctx is built for performance. The library has been carefully optimized to minimize overhead when creating, parsing, and propagating trace contexts. Below are the actual benchmark results comparing tctx against popular alternatives.
+
+<Note>
+All benchmarks are run using Deno's built-in benchmarking tool. Results show average time per iteration, with lower times indicating better performance.
+</Note>
+
+## Benchmark Results
+
+The benchmarks compare three libraries:
+- **tctx** - This library
+- **traceparent** - The `traceparent` npm package
+- **trace-context** - The `trace-context` npm package
+
+Each benchmark measures three core operations:
+
+### Make Operation
+
+Creating a new traceparent from scratch.
+
+```
+benchmark          time (avg)        iter/s             (min … max)       p75       p99      p995
+---------------------------------------------------------------------------------------------------
+tctx              488.04 ns/iter   2,049,021.8  (477.8 ns … 540.92 ns) 490.45 ns 527.86 ns 540.92 ns
+traceparent         6.08 µs/iter     164,346.2     (5.88 µs … 6.46 µs) 6.17 µs 6.46 µs 6.46 µs
+trace-context       1.35 µs/iter     743,381.3     (1.33 µs … 1.46 µs) 1.35 µs 1.46 µs 1.46 µs
+
+summary
+  tctx
+   2.76x faster than trace-context
+   12.47x faster than traceparent
+```
+
+<Tip>
+tctx can create over **2 million traceparents per second**, making it ideal for high-throughput applications.
+</Tip>
+
+### Parse Operation
+
+Parsing an existing traceparent string into an object.
+
+```
+benchmark          time (avg)        iter/s             (min … max)       p75       p99      p995
+---------------------------------------------------------------------------------------------------
+tctx              265.57 ns/iter   3,765,435.2 (260.82 ns … 285.88 ns) 269.13 ns 273.34 ns 285.88 ns
+traceparent         5.09 µs/iter     196,302.6     (4.88 µs … 5.36 µs) 5.18 µs 5.36 µs 5.36 µs
+trace-context     240.18 ns/iter   4,163,540.7 (237.21 ns … 300.23 ns) 238.89 ns 276.17 ns 297.94 ns
+
+summary
+  trace-context
+   1.11x faster than tctx
+   21.21x faster than traceparent
+```
+
+<Info>
+For parsing, tctx and trace-context are nearly identical in performance, with trace-context holding a slight edge. Both are excellent choices for parse-heavy workloads.
+</Info>
+
+### Child Operation
+
+Creating a child span from an existing traceparent.
+
+```
+benchmark          time (avg)        iter/s             (min … max)       p75       p99      p995
+---------------------------------------------------------------------------------------------------
+tctx              724.74 ns/iter   1,379,804.8 (709.77 ns … 752.56 ns) 733.47 ns 752.56 ns 752.56 ns
+traceparent         8.18 µs/iter     122,254.2     (7.99 µs … 8.77 µs) 8.24 µs 8.77 µs 8.77 µs
+trace-context       1.99 µs/iter     502,728.4     (1.96 µs … 2.05 µs) 1.99 µs 2.05 µs 2.05 µs
+
+summary
+  tctx
+   2.74x faster than trace-context
+   11.29x faster than traceparent
+```
+
+<Tip>
+Child span creation is a critical operation in distributed tracing. tctx's **11.29x performance advantage** over traceparent means less overhead when propagating traces through your system.
+</Tip>
+
+## Performance Summary
+
+| Operation | tctx vs traceparent | tctx vs trace-context |
+|-----------|--------------------|-----------------------|
+| **make**  | 12.47x faster      | 2.76x faster          |
+| **parse** | 19.16x faster      | 1.11x slower          |
+| **child** | 11.29x faster      | 2.74x faster          |
+
+## What Makes tctx Fast?
+
+tctx achieves its performance through several optimizations:
+
+1. **Minimal allocations** - Reuses buffers and avoids unnecessary object creation
+2. **Optimized string operations** - Uses efficient string building techniques
+3. **Zero dependencies** - No overhead from external packages
+4. **Smart defaults** - Optimized for the common case while remaining spec-compliant
+
+## Running Benchmarks Yourself
+
+You can run the benchmarks yourself using the source code:
+
+```bash
+cd lib
+deno bench traceparent.bench.ts
+```
+
+The benchmark code is available at `lib/traceparent.bench.ts` in the repository.

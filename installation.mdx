@@ -1,0 +1,143 @@
+---
+title: Installation
+description: Install tctx with your preferred package manager
+---
+
+tctx is available on npm and JSR, making it easy to install with any JavaScript package manager.
+
+## Package Managers
+
+<Tabs>
+  <Tab title="npm">
+    ```bash
+    npm install tctx
+    ```
+  </Tab>
+  <Tab title="yarn">
+    ```bash
+    yarn add tctx
+    ```
+  </Tab>
+  <Tab title="pnpm">
+    ```bash
+    pnpm add tctx
+    ```
+  </Tab>
+  <Tab title="bun">
+    ```bash
+    bun add tctx
+    ```
+  </Tab>
+</Tabs>
+
+## JSR (JavaScript Registry)
+
+For Deno or other runtimes that support JSR, you can install tctx from the JavaScript Registry:
+
+<Tabs>
+  <Tab title="deno">
+    ```bash
+    deno add @mr/tracecontext
+    ```
+  </Tab>
+  <Tab title="npm (via JSR)">
+    ```bash
+    npx jsr add @mr/tracecontext
+    ```
+  </Tab>
+  <Tab title="yarn (via JSR)">
+    ```bash
+    yarn dlx jsr add @mr/tracecontext
+    ```
+  </Tab>
+  <Tab title="pnpm (via JSR)">
+    ```bash
+    pnpm dlx jsr add @mr/tracecontext
+    ```
+  </Tab>
+  <Tab title="bun (via JSR)">
+    ```bash
+    bunx jsr add @mr/tracecontext
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+  The npm package is published as `tctx` while the JSR package is published as `@mr/tracecontext`.
+</Note>
+
+## Verify Installation
+
+After installation, verify that tctx is working correctly:
+
+<CodeGroup>
+```ts npm
+import * as traceparent from 'tctx/traceparent';
+import * as tracestate from 'tctx/tracestate';
+
+const parent = traceparent.make();
+console.log(String(parent));
+// Output: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+```
+
+```ts JSR
+import * as traceparent from '@mr/tracecontext/traceparent';
+import * as tracestate from '@mr/tracecontext/tracestate';
+
+const parent = traceparent.make();
+console.log(String(parent));
+// Output: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+```
+</CodeGroup>
+
+## Dependencies
+
+tctx has minimal dependencies:
+
+- **@lukeed/csprng** - Cryptographically secure pseudo-random number generation for creating trace IDs
+
+This single dependency ensures secure random ID generation while keeping the package lightweight.
+
+## TypeScript Support
+
+tctx includes full TypeScript type definitions out of the box. No additional `@types` packages are required.
+
+```ts
+import * as traceparent from 'tctx/traceparent';
+import type { Traceparent } from 'tctx/traceparent';
+
+const parent: Traceparent = traceparent.make();
+```
+
+## Runtime Compatibility
+
+tctx works seamlessly across all major JavaScript runtimes:
+
+- **Node.js** - Version 14 and above
+- **Deno** - All versions
+- **Bun** - All versions
+- **Browsers** - All modern browsers (ES2015+)
+- **Edge Functions** - Cloudflare Workers, Vercel Edge, Deno Deploy, etc.
+
+<Tip>
+  tctx is designed to be runtime-agnostic with no Node.js-specific APIs, making it perfect for edge computing environments.
+</Tip>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card
+    title="Quickstart Guide"
+    icon="rocket"
+    href="/quickstart"
+  >
+    Learn how to use tctx in your application
+  </Card>
+  <Card
+    title="API Reference"
+    icon="book"
+    href="/api/traceparent"
+  >
+    Explore the complete API documentation
+  </Card>
+</CardGroup>

@@ -1,0 +1,316 @@
+---
+title: Trace Flags
+description: Understand and work with trace flags in the W3C Trace Context specification
+---
+
+Trace flags are a 1-byte bitmask that controls various aspects of trace behavior. The flags field is the final component of a traceparent header and is represented as 2 hexadecimal characters.
+
+## Anatomy of Flags
+
+In a traceparent header, flags are the last 2 characters:
+
+```
+00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+                                                    ^^
+                                                    flags (2 hex = 8 bits)
+```
+
+The flags field is an 8-bit bitmask:
+```
+01 (hex) = 0b00000001 (binary)
+                    ^
+                    Sampled flag (bit 0)
+```
+
+## Available Flags
+
+tctx provides two flag constants:
+
+<ResponseField name="FLAG_SAMPLE" type="number" default="0b00000001">
+  The bitmask representing a sampled traceparent. When this bit is set to `1`, the trace should be recorded by tracing systems.
+  
+  ```ts
+  import { FLAG_SAMPLE } from 'tctx/traceparent';
+  console.log(FLAG_SAMPLE); // 1 (0b00000001)
+  ```
+</ResponseField>
+
+<ResponseField name="FLAG_RANDOM" type="number" default="0b00000010">
+  The bitmask representing a random traceparent. When this bit is set to `1`, the trace was generated with cryptographically random IDs.
+  
+  ```ts
+  import { FLAG_RANDOM } from 'tctx/traceparent';
+  console.log(FLAG_RANDOM); // 2 (0b00000010)
+  ```
+</ResponseField>
+
+<Note>
+  By default, `traceparent.make()` sets both flags: `FLAG_SAMPLE | FLAG_RANDOM` = `0b00000011` = `03` (hex).
+</Note>
+
+## Working with Flags
+
+The flags field is stored as a number in the `Traceparent` object:
+
+```ts
+import * as traceparent from 'tctx/traceparent';
+
+const parent = traceparent.make();
+console.log(parent.flags); // 3 (0b00000011)
+console.log(parent.toString()); // 00-...-...-03
+```
+
+### Checking Flags
+
+Use bitwise AND (`&`) to check if a specific flag is set:
+
+<CodeGroup>
+```ts Check Sampled Flag
+import { FLAG_SAMPLE, is_sampled } from 'tctx/traceparent';
+
+const parent = traceparent.make();
+
+// Using helper function (recommended)
+if (is_sampled(parent)) {
+  console.log('Trace is sampled');
+}
+
+// Using bitwise operations (advanced)
+if ((parent.flags & FLAG_SAMPLE) === FLAG_SAMPLE) {
+  console.log('Trace is sampled');
+}
+```
+
+```ts Check Random Flag
+import { FLAG_RANDOM, is_randomed } from 'tctx/traceparent';
+
+const parent = traceparent.make();
+
+// Using helper function (recommended)
+if (is_randomed(parent)) {
+  console.log('Trace uses random IDs');
+}
+
+// Using bitwise operations (advanced)
+if ((parent.flags & FLAG_RANDOM) === FLAG_RANDOM) {
+  console.log('Trace uses random IDs');
+}
+```
+</CodeGroup>
+
+### Setting Flags
+
+Use bitwise OR (`|`) to set a specific flag:
+
+```ts
+import { FLAG_SAMPLE, sample } from 'tctx/traceparent';
+
+const parent = traceparent.make();
+
+// Using helper function (recommended)
+sample(parent);
+
+// Using bitwise operations (advanced)
+parent.flags |= FLAG_SAMPLE;
+```
+
+### Clearing Flags
+
+Use bitwise AND with NOT (`& ~`) to clear a specific flag:
+
+```ts
+import { FLAG_SAMPLE, unsample } from 'tctx/traceparent';
+
+const parent = traceparent.make();
+
+// Using helper function (recommended)
+unsample(parent);
+
+// Using bitwise operations (advanced)
+parent.flags &= ~FLAG_SAMPLE;
+```
+
+## Flag Propagation
+
+When you call `.child()` on a traceparent, **all flags are copied to the child**:
+
+```ts
+import * as traceparent from 'tctx/traceparent';
+
+const parent = traceparent.make();
+console.log(parent.flags); // 3 (0b00000011)
+
+const child = parent.child();
+console.log(child.flags); // 3 (0b00000011) - same flags
+```
+
+This ensures that sampling decisions and other flag-based behaviors propagate throughout the entire trace.
+
+<Warning>
+  According to the W3C specification, you should create a new child span (using `.child()`) before modifying flags like the sampled flag. This properly reflects where the decision was made in the trace hierarchy.
+</Warning>
+
+## W3C Specification Details
+
+The W3C Trace Context specification defines the flags field as follows:
+
+<AccordionGroup>
+  <Accordion title="Bit 0: Sampled (01)">
+    **Sampled flag** - When set to `1`, this trace should be recorded.
+    
+    Per the spec:
+    - `0` = Not sampled (trace should be dropped)
+    - `1` = Sampled (trace should be recorded)
+    
+    This is the only flag with defined behavior in version `00` of the spec.
+  </Accordion>
+  
+  <Accordion title="Bit 1: Random (02)">
+    **Random flag** - When set to `1`, the trace-id and parent-id were generated using cryptographically random values.
+    
+    This is a tctx-specific flag and is set by `make()` to indicate that the IDs were generated using a cryptographically secure random number generator.
+  </Accordion>
+  
+  <Accordion title="Bits 2-7: Reserved">
+    The remaining 6 bits are reserved for future use and should be set to `0` unless defined by a future version of the specification.
+    
+    ```
+    0b00000000
+      ^^^^^^
+      Reserved bits (must be 0)
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Examples
+
+### Custom Flag Operations
+
+You can perform custom flag operations using bitwise operators:
+
+```ts
+import * as traceparent from 'tctx/traceparent';
+import { FLAG_SAMPLE, FLAG_RANDOM } from 'tctx/traceparent';
+
+const parent = traceparent.make();
+
+// Check if both flags are set
+if ((parent.flags & (FLAG_SAMPLE | FLAG_RANDOM)) === (FLAG_SAMPLE | FLAG_RANDOM)) {
+  console.log('Both sampled and random flags are set');
+}
+
+// Clear all flags
+parent.flags = 0;
+
+// Set only the sample flag
+parent.flags = FLAG_SAMPLE;
+
+// Toggle the sample flag
+parent.flags ^= FLAG_SAMPLE;
+```
+
+### Conditional Sampling Based on Flags
+
+```ts
+import * as traceparent from 'tctx/traceparent';
+import { FLAG_SAMPLE, is_sampled } from 'tctx/traceparent';
+
+export async function handler(request: Request) {
+  const parent = traceparent.parse(request.headers.traceparent);
+  
+  if (!parent) {
+    // Start new trace
+    const newParent = traceparent.make();
+    return processRequest(newParent);
+  }
+  
+  // Check if parent was sampled
+  if (is_sampled(parent)) {
+    console.log('Parent trace is sampled, continue sampling');
+    // Continue with sampled trace
+  } else {
+    console.log('Parent trace is not sampled');
+    // You might still choose to sample based on other criteria
+  }
+  
+  return processRequest(parent);
+}
+```
+
+### Debug Flag Information
+
+```ts
+import * as traceparent from 'tctx/traceparent';
+import { FLAG_SAMPLE, FLAG_RANDOM } from 'tctx/traceparent';
+
+function debugFlags(parent: traceparent.Traceparent) {
+  console.log('Flags:', parent.flags.toString(2).padStart(8, '0')); // Binary
+  console.log('Hex:', parent.flags.toString(16).padStart(2, '0')); // Hex
+  console.log('Sampled:', (parent.flags & FLAG_SAMPLE) === FLAG_SAMPLE);
+  console.log('Random:', (parent.flags & FLAG_RANDOM) === FLAG_RANDOM);
+}
+
+const parent = traceparent.make();
+debugFlags(parent);
+// Output:
+// Flags: 00000011
+// Hex: 03
+// Sampled: true
+// Random: true
+```
+
+## Helper Functions
+
+tctx provides helper functions for common flag operations:
+
+<CardGroup cols={2}>
+  <Card title="is_sampled()" icon="check">
+    Returns `true` if the sampled flag is set
+    ```ts
+    is_sampled(parent) // boolean
+    ```
+  </Card>
+  
+  <Card title="is_randomed()" icon="dice">
+    Returns `true` if the random flag is set
+    ```ts
+    is_randomed(parent) // boolean
+    ```
+  </Card>
+  
+  <Card title="sample()" icon="filter">
+    Sets the sampled flag
+    ```ts
+    sample(parent) // void
+    ```
+  </Card>
+  
+  <Card title="unsample()" icon="filter-circle-xmark">
+    Clears the sampled flag
+    ```ts
+    unsample(parent) // void
+    ```
+  </Card>
+</CardGroup>
+
+<Tip>
+  Always use the provided helper functions (`sample()`, `unsample()`, `is_sampled()`) instead of direct bit manipulation unless you have a specific need for advanced flag operations.
+</Tip>
+
+## Best Practices
+
+1. **Use helper functions** - Prefer `is_sampled()` and `sample()` over direct bit manipulation
+2. **Create child before modifying** - Call `.child()` before changing flags per the W3C spec
+3. **Preserve unknown flags** - When modifying flags, use bitwise operations to preserve bits you don't recognize
+4. **Document custom flags** - If you use reserved bits for custom purposes, document them clearly
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Sampling Guide" icon="filter" href="/guides/sampling">
+    Learn how to control trace sampling
+  </Card>
+  <Card title="Producer/Consumer Pattern" icon="arrow-right-arrow-left" href="/guides/producer-consumer">
+    Understand trace propagation
+  </Card>
+</CardGroup>

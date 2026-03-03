@@ -1,0 +1,295 @@
+---
+title: Sampling
+description: Control which traces are collected using sampling functions in tctx
+---
+
+Sampling determines whether a trace should be collected and recorded by your tracing system. The sampled flag is a single bit in the traceparent flags field that controls this behavior.
+
+## Understanding Sampling
+
+The **sampled flag** (`FLAG_SAMPLE`) indicates whether the trace should be recorded:
+- `1` (sampled) - The trace should be collected and recorded
+- `0` (not sampled) - The trace should be dropped
+
+By default, `traceparent.make()` creates traces with the sampled flag set to `1`.
+
+<Note>
+  Sampling decisions should be made as early as possible in the trace and propagated to all downstream services to ensure consistent behavior.
+</Note>
+
+## Checking Sample Status
+
+Use `is_sampled()` to check if a trace is currently being sampled:
+
+```ts
+import * as traceparent from 'tctx/traceparent';
+
+const parent = traceparent.parse(request.headers.traceparent);
+
+if (traceparent.is_sampled(parent)) {
+  // Trace is being recorded
+  console.log('This trace will be collected');
+} else {
+  // Trace is not being recorded
+  console.log('This trace will be dropped');
+}
+```
+
+## Enabling Sampling
+
+Use `sample()` to enable sampling on a traceparent:
+
+<Steps>
+  <Step title="Parse or create a traceparent">
+    ```ts
+    import * as traceparent from 'tctx/traceparent';
+    
+    const parent = traceparent.parse(request.headers.traceparent) || traceparent.make();
+    ```
+  </Step>
+
+  <Step title="Apply sampling decision">
+    ```ts
+    traceparent.sample(parent);
+    ```
+    
+    This sets the sampled flag bit using bitwise OR:
+    ```ts
+    parent.flags |= FLAG_SAMPLE; // Sets bit to 1
+    ```
+  </Step>
+
+  <Step title="Propagate to downstream services">
+    ```ts
+    fetch('/downstream', {
+      headers: {
+        traceparent: parent.child(),
+      },
+    });
+    ```
+    
+    <Warning>
+      According to the W3C specification, you should create a child span (using `.child()`) before changing the sampling decision to properly reflect the decision point in the trace hierarchy.
+    </Warning>
+  </Step>
+</Steps>
+
+## Disabling Sampling
+
+Use `unsample()` to disable sampling on a traceparent:
+
+```ts
+import * as traceparent from 'tctx/traceparent';
+
+const parent = traceparent.parse(request.headers.traceparent);
+
+// Decide not to sample this trace
+traceparent.unsample(parent);
+
+fetch('/downstream', {
+  headers: {
+    traceparent: parent.child(),
+  },
+});
+```
+
+This clears the sampled flag bit using bitwise AND with NOT:
+```ts
+parent.flags &= ~FLAG_SAMPLE; // Sets bit to 0
+```
+
+## Sampling Strategies
+
+Here are common sampling strategies you can implement:
+
+<CodeGroup>
+```ts Probability-based Sampling
+import * as traceparent from 'tctx/traceparent';
+
+const SAMPLE_RATE = 0.1; // Sample 10% of traces
+
+function shouldSample(): boolean {
+  return Math.random() < SAMPLE_RATE;
+}
+
+export async function handler(request: Request) {
+  const parent = traceparent.parse(request.headers.traceparent) || traceparent.make();
+  
+  // Apply sampling decision
+  if (shouldSample()) {
+    traceparent.sample(parent);
+  } else {
+    traceparent.unsample(parent);
+  }
+  
+  // Continue with request
+  return fetch('/downstream', {
+    headers: { traceparent: parent.child() },
+  });
+}
+```
+
+```ts Error-based Sampling
+import * as traceparent from 'tctx/traceparent';
+
+export async function handler(request: Request) {
+  const parent = traceparent.parse(request.headers.traceparent) || traceparent.make();
+  
+  try {
+    const result = await processRequest(request);
+    return result;
+  } catch (error) {
+    // Always sample traces that contain errors
+    traceparent.sample(parent);
+    throw error;
+  }
+}
+```
+
+```ts Route-based Sampling
+import * as traceparent from 'tctx/traceparent';
+
+const HIGH_VALUE_ROUTES = ['/checkout', '/payment', '/api/critical'];
+
+export async function handler(request: Request) {
+  const parent = traceparent.parse(request.headers.traceparent) || traceparent.make();
+  const url = new URL(request.url);
+  
+  // Always sample high-value routes
+  if (HIGH_VALUE_ROUTES.some(route => url.pathname.startsWith(route))) {
+    traceparent.sample(parent);
+  } else {
+    // Sample 1% of other routes
+    if (Math.random() < 0.01) {
+      traceparent.sample(parent);
+    } else {
+      traceparent.unsample(parent);
+    }
+  }
+  
+  return fetch('/downstream', {
+    headers: { traceparent: parent.child() },
+  });
+}
+```
+
+```ts Respect Upstream Sampling
+import * as traceparent from 'tctx/traceparent';
+
+export async function handler(request: Request) {
+  const parent = traceparent.parse(request.headers.traceparent);
+  
+  // If no parent, make sampling decision
+  if (!parent) {
+    const newParent = traceparent.make();
+    if (Math.random() > 0.1) {
+      traceparent.unsample(newParent);
+    }
+    return processWithParent(newParent);
+  }
+  
+  // If parent exists, respect its sampling decision
+  return processWithParent(parent);
+}
+```
+</CodeGroup>
+
+## API Reference
+
+<ResponseField name="sample" type="(id: Traceparent) => void">
+  Modifies the flags of a Traceparent to enable the sampled flag bit.
+  
+  <Expandable title="parameters">
+    <ResponseField name="id" type="Traceparent" required>
+      The traceparent object to modify
+    </ResponseField>
+  </Expandable>
+  
+  ```ts
+  import * as traceparent from 'tctx/traceparent';
+  
+  const parent = traceparent.make();
+  traceparent.sample(parent);
+  ```
+</ResponseField>
+
+<ResponseField name="unsample" type="(id: Traceparent) => void">
+  Modifies the flags of a Traceparent to disable the sampled flag bit.
+  
+  <Expandable title="parameters">
+    <ResponseField name="id" type="Traceparent" required>
+      The traceparent object to modify
+    </ResponseField>
+  </Expandable>
+  
+  ```ts
+  import * as traceparent from 'tctx/traceparent';
+  
+  const parent = traceparent.make();
+  traceparent.unsample(parent);
+  ```
+</ResponseField>
+
+<ResponseField name="is_sampled" type="(id: Traceparent) => boolean">
+  Returns whether the traceparent is currently being sampled.
+  
+  <Expandable title="parameters">
+    <ResponseField name="id" type="Traceparent" required>
+      The traceparent object to check
+    </ResponseField>
+  </Expandable>
+  
+  ```ts
+  import * as traceparent from 'tctx/traceparent';
+  
+  const parent = traceparent.make();
+  console.log(traceparent.is_sampled(parent)); // true
+  
+  traceparent.unsample(parent);
+  console.log(traceparent.is_sampled(parent)); // false
+  ```
+</ResponseField>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Create child spans before sampling decisions" icon="code-branch">
+    Per the W3C spec, call `.child()` before modifying sampling flags:
+    
+    ```ts
+    const child = parent.child();
+    traceparent.sample(child);
+    ```
+  </Card>
+  
+  <Card title="Make decisions early" icon="bolt">
+    Sampling decisions should be made as early as possible in the trace to avoid wasting resources on unsampled traces.
+  </Card>
+  
+  <Card title="Document your strategy" icon="book">
+    Clearly document your sampling strategy so all teams understand why certain traces are collected or dropped.
+  </Card>
+  
+  <Card title="Monitor sample rates" icon="chart-line">
+    Track the percentage of sampled traces to ensure your strategy aligns with your tracing system's capacity and budget.
+  </Card>
+</CardGroup>
+
+<Tip>
+  The `FLAG_SAMPLE` constant is available for direct bit manipulation if needed:
+  ```ts
+  import { FLAG_SAMPLE } from 'tctx/traceparent';
+  console.log(FLAG_SAMPLE); // 0b00000001
+  ```
+</Tip>
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Producer/Consumer Pattern" icon="arrow-right-arrow-left" href="/guides/producer-consumer">
+    Learn how to propagate trace contexts
+  </Card>
+  <Card title="Trace Flags" icon="flag" href="/guides/flags">
+    Understand all available trace flags
+  </Card>
+</CardGroup>

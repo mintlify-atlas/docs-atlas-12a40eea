@@ -1,0 +1,220 @@
+---
+title: Producer/Consumer Pattern
+description: Learn how to implement distributed tracing across services using the producer/consumer pattern with tctx
+---
+
+The producer/consumer pattern is fundamental to distributed tracing. The **producer** creates trace contexts and passes them to downstream services, while the **consumer** receives those contexts, continues the trace, and propagates it further.
+
+## Overview
+
+In a distributed system:
+- **Producers** initiate traces by creating new trace contexts
+- **Consumers** receive trace contexts, parse them, and create child spans for downstream calls
+- Both use `traceparent` and `tracestate` headers to propagate context
+
+## Producer: Starting a Trace
+
+A producer creates a new trace context and sends it to a downstream service.
+
+<Steps>
+  <Step title="Import the modules">
+    ```ts
+    import * as traceparent from 'tctx/traceparent';
+    import * as tracestate from 'tctx/tracestate';
+    ```
+  </Step>
+
+  <Step title="Create trace context headers">
+    Create a new `traceparent` and optional `tracestate` with vendor-specific data:
+    
+    ```ts
+    fetch('/api', {
+      headers: {
+        traceparent: traceparent.make(),
+        tracestate: tracestate.make({ key: 'value' }),
+      },
+    });
+    ```
+    
+    The `make()` function creates a new trace with:
+    - A unique `trace-id` (32 hex characters)
+    - A unique `parent-id` (16 hex characters)  
+    - Default flags (sampled + random)
+  </Step>
+</Steps>
+
+<Note>
+  By default, `traceparent.make()` creates a sampled trace with both `FLAG_SAMPLE` and `FLAG_RANDOM` set.
+</Note>
+
+## Consumer: Continuing a Trace
+
+A consumer receives trace context headers, parses them, and creates child spans for downstream calls.
+
+<Steps>
+  <Step title="Parse incoming headers">
+    Parse the `traceparent` and `tracestate` headers from the incoming request:
+    
+    ```ts
+    import * as traceparent from 'tctx/traceparent';
+    import * as tracestate from 'tctx/tracestate';
+
+    const parent = traceparent.parse(request.headers.traceparent);
+    const state = tracestate.parse(request.headers.tracestate);
+    ```
+    
+    <Warning>
+      Always validate that `traceparent.parse()` returns a valid object before parsing `tracestate`. Per the W3C spec, you should only parse tracestate if you have a valid traceparent.
+    </Warning>
+  </Step>
+
+  <Step title="Update tracestate with vendor data">
+    Add or update vendor-specific information in the tracestate:
+    
+    ```ts
+    state.set('vendor', 'value');
+    ```
+    
+    The `set()` method will:
+    - Update the value if the key exists (and move it to the front)
+    - Prepend a new key-value pair if the key doesn't exist
+    - Remove the oldest entry if the tracestate is full (32 entries)
+  </Step>
+
+  <Step title="Create a child span for downstream calls">
+    Use the `child()` method to create a new span with a new `parent-id` while preserving the `trace-id`:
+    
+    ```ts
+    fetch('/downstream', {
+      headers: {
+        traceparent: parent.child(),
+        tracestate: state,
+      },
+    });
+    ```
+    
+    The `child()` method:
+    - Keeps the same `trace-id` (maintains the trace chain)
+    - Generates a new `parent-id` (creates a new span)
+    - Copies all existing flags (preserves sampling decisions)
+  </Step>
+</Steps>
+
+## Complete Example
+
+Here's a complete example showing both producer and consumer:
+
+<CodeGroup>
+```ts Producer Service
+import * as traceparent from 'tctx/traceparent';
+import * as tracestate from 'tctx/tracestate';
+
+// Start a new trace
+const response = await fetch('/api', {
+  headers: {
+    traceparent: traceparent.make(),
+    tracestate: tracestate.make({ service: 'frontend' }),
+  },
+});
+```
+
+```ts Consumer Service
+import * as traceparent from 'tctx/traceparent';
+import * as tracestate from 'tctx/tracestate';
+
+export async function handler(request: Request) {
+  // Parse incoming trace context
+  const parent = traceparent.parse(request.headers.get('traceparent'));
+  const state = tracestate.parse(request.headers.get('tracestate'));
+  
+  // Add vendor-specific data
+  state.set('service', 'api');
+  state.set('db-queries', '3');
+  
+  // Continue the trace to downstream service
+  const result = await fetch('/downstream', {
+    headers: {
+      traceparent: parent.child(),
+      tracestate: state,
+    },
+  });
+  
+  return result;
+}
+```
+</CodeGroup>
+
+## Trace Anatomy
+
+Understanding the structure of a traceparent helps visualize the producer/consumer flow:
+
+```
+00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+^  ^                                ^                ^
+|  |                                |                |
+|  |                                |                flags (2 hex)
+|  |                                parent-id (16 hex)
+|  trace-id (32 hex) - STAYS THE SAME across the trace
+version (2 hex)
+```
+
+<Tip>
+  When calling `parent.child()`, only the `parent-id` changes. The `trace-id` remains constant throughout the entire distributed trace, allowing you to correlate all spans.
+</Tip>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Always validate parsed traceparent">
+    The `parse()` function returns `null` if the header is invalid:
+    
+    ```ts
+    const parent = traceparent.parse(request.headers.traceparent);
+    if (!parent) {
+      // Invalid or missing traceparent, start a new trace
+      parent = traceparent.make();
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Only parse tracestate if traceparent is valid">
+    Per the W3C specification, tracestate should only be processed if traceparent is valid:
+    
+    ```ts
+    const parent = traceparent.parse(request.headers.traceparent);
+    let state;
+    
+    if (parent) {
+      state = tracestate.parse(request.headers.tracestate);
+    } else {
+      parent = traceparent.make();
+      state = tracestate.make();
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Preserve trace context in async operations">
+    When performing multiple async operations, ensure you use the same parent context:
+    
+    ```ts
+    const parent = traceparent.parse(request.headers.traceparent);
+    
+    // Both calls should use parent.child(), not child().child()
+    await Promise.all([
+      fetch('/service-a', { headers: { traceparent: parent.child() } }),
+      fetch('/service-b', { headers: { traceparent: parent.child() } }),
+    ]);
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Sampling" icon="filter" href="/guides/sampling">
+    Control which traces are collected
+  </Card>
+  <Card title="Trace Flags" icon="flag" href="/guides/flags">
+    Understand and manipulate trace flags
+  </Card>
+</CardGroup>
