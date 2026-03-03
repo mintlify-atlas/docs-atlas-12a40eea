@@ -1,0 +1,75 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "tctx",
+  "projectDescription": "Blazing fast W3C Trace Contexts for any JS runtime",
+  "theme": "aspen",
+  "primaryColor": "#2563eb",
+  "lightColor": "#3b82f6",
+  "darkColor": "#1e40af",
+  "navigation": {
+    "groups": [
+      {
+        "group": "Get Started",
+        "pages": [
+          "introduction",
+          "installation",
+          "quickstart"
+        ]
+      },
+      {
+        "group": "Core Concepts",
+        "pages": [
+          "concepts/trace-context",
+          "concepts/distributed-tracing"
+        ]
+      },
+      {
+        "group": "API Reference",
+        "pages": [
+          "api/traceparent",
+          "api/tracestate"
+        ]
+      },
+      {
+        "group": "Guides",
+        "pages": [
+          "guides/producer-consumer",
+          "guides/sampling",
+          "guides/flags"
+        ]
+      },
+      {
+        "group": "Performance",
+        "pages": [
+          "performance/benchmarks",
+          "performance/comparison"
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "W3C Trace Context Level 2 compliant",
+    "Blazing fast performance (12x faster than alternatives)",
+    "Works in any JS runtime (Node.js, Deno, Bun, browsers)",
+    "Zero dependencies (except @lukeed/csprng)",
+    "Simple API for creating and parsing trace contexts",
+    "Built-in support for sampling and flags",
+    "TypeScript support with full type definitions"
+  ],
+  "publicApiSurface": [
+    "traceparent.make()",
+    "traceparent.parse(value)",
+    "traceparent.sample(id)",
+    "traceparent.unsample(id)",
+    "traceparent.is_sampled(id)",
+    "traceparent.is_randomed(id)",
+    "traceparent.FLAG_SAMPLE",
+    "traceparent.FLAG_RANDOM",
+    "Traceparent.child()",
+    "Traceparent.toString()",
+    "tracestate.make(initial)",
+    "tracestate.parse(value)",
+    "Tracestate.set(key, value)",
+    "Tracestate.toString()"
+  ]
+}
